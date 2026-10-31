@@ -11,13 +11,14 @@ import (
 // This is a presentation projection, never an execution/log response. Only
 // literal allowlisted events can affect it; unknown diagnostics are discarded.
 type RefundTimelineItem struct {
-	Stage           string     `json:"stage"`
-	Attempt         int        `json:"attempt"`
-	Status          string     `json:"status"`
-	StartedAt       *time.Time `json:"started_at"`
-	FinishedAt      *time.Time `json:"finished_at"`
-	DurationSeconds *int64     `json:"duration_seconds"`
-	Reason          string     `json:"reason"`
+	Stage           string                  `json:"stage"`
+	Attempt         int                     `json:"attempt"`
+	Status          string                  `json:"status"`
+	StartedAt       *time.Time              `json:"started_at"`
+	FinishedAt      *time.Time              `json:"finished_at"`
+	DurationSeconds *int64                  `json:"duration_seconds"`
+	Reason          string                  `json:"reason"`
+	PersonalPlan    *RefundPersonalPlanView `json:"personal_plan,omitempty"`
 }
 type RefundTimeline struct {
 	Recovery    *RefundRecoveryView  `json:"recovery,omitempty"`
@@ -67,6 +68,9 @@ func (s *Store) AdminRefundTimeline(ctx context.Context, id string) (*RefundTime
 		return nil, err
 	}
 	out := projectRefundTimeline(status, created, now, accepted, completed, events)
+	if err = readTimelinePersonalPlans(ctx, tx, id, out); err != nil {
+		return nil, err
+	}
 	out.Recovery, err = readRefundRecovery(ctx, tx, id)
 	if err != nil {
 		return nil, err

@@ -51,16 +51,27 @@ def record(result, *, data=None, account_id="", status=0, network_code=0, starte
 def select_personal_workspace(flow, referer_url):
     data = flow.decode_oauth_session_cookie()
     rows = data.get("workspaces") if isinstance(data, dict) else None
-    choices = set()
+    personal_choices, untyped_choices = set(), set()
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict):
             continue
         account = row.get("account") if isinstance(row.get("account"), dict) else row
         account_id = account.get("account_id") or account.get("id")
-        personal = (row.get("is_personal") is True or account.get("structure") == "personal"
-                    or account.get("type") == "personal")
-        if personal and isinstance(account_id, str) and account_id and account_id != flow.target_team:
-            choices.add(account_id)
+        if not isinstance(account_id, str) or not account_id or account_id == flow.target_team:
+            continue
+        kind = account.get("structure") or account.get("type")
+        personal = row.get("is_personal") is True or kind == "personal"
+        if kind in {"workspace", "team", "business"} or row.get("is_personal") is False:
+            continue
+        if personal:
+            personal_choices.add(account_id)
+        else:
+            untyped_choices.add(account_id)
+    # Real login cookies may contain IDs without a workspace type. Like the
+    # fallback login, try the sole non-target candidate, then require the live
+    # accounts/check response to identify that authenticated account as personal.
+    # Selection alone is never evidence of a personal plan.
+    choices = personal_choices or untyped_choices
     if len(choices) != 1:
         # No authorization code was consumed: the original team continuation
         # remains usable. Never guess another Business workspace is personal.

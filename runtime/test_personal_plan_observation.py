@@ -1,5 +1,6 @@
 """One login, personal observation, same-session team switch: loopback only."""
 import json
+import base64
 import unittest
 from unittest.mock import Mock, patch
 
@@ -23,6 +24,56 @@ class PersonalPlanObservationTests(unittest.TestCase):
             result = runner.execute(value, lambda name, *args: evidence.append((name, args)), login_factory=factory, sleep=lambda _: None)
         self.assertEqual(fixture.errors, [])
         return result, fixture, evidence, sessions
+
+    def test_untyped_workspace_ids_query_plan_before_accepting_team(self):
+        class Untyped(ProxyFlow):
+            def reply(self, role, method, url, headers, raw):
+                if url.path == "/workspace":
+                    cookie = base64.urlsafe_b64encode(json.dumps({"workspaces": [
+                        {"id": self.job["mother"]["team_id"]}, {"id": "fixture-personal"}
+                    ]}).encode()).decode().rstrip("=")
+                    return 200, {}, {"Set-Cookie": "oai-client-auth-session=" + cookie + "; Path=/"}
+                if url.path.startswith("/backend-api/accounts/check/"):
+                    assert not self.members, "personal observation must precede joining our team"
+                return super().reply(role, method, url, headers, raw)
+        result, fixture, events, sessions = self.run_flow(Untyped)
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(sessions), 1)
+        paths = [path for _, _, path, _, _ in fixture.records]
+        self.assertEqual(paths.count("/api/accounts/password/verify"), 1)
+        self.assertEqual(paths.count("/api/accounts/mfa/verify"), 1)
+        plans = [args[0]["diagnostic"]["evidence"].get("workspaces", {})
+                 for name, args in events if name == "diagnostic"]
+        self.assertTrue(any(p.get("source") == "personal_accounts_check" and p.get("result") == "observed" for p in plans))
+
+    def test_untyped_business_is_never_reported_as_personal(self):
+        class Business(ProxyFlow):
+            def reply(self, role, method, url, headers, raw):
+                status, body, response_headers = super().reply(role, method, url, headers, raw)
+                if url.path == "/workspace":
+                    cookie = base64.urlsafe_b64encode(json.dumps({"workspaces": [
+                        {"id": self.job["mother"]["team_id"]}, {"id": "fixture-personal"}
+                    ]}).encode()).decode().rstrip("=")
+                    response_headers["Set-Cookie"] = "oai-client-auth-session=" + cookie + "; Path=/"
+                if url.path.startswith("/backend-api/accounts/check/"):
+                    body["accounts"]["personal"]["account"]["structure"] = "workspace"
+                return status, body, response_headers
+        result, _, events, _ = self.run_flow(Business)
+        self.assertTrue(result["ok"])
+        plans = [args[0]["diagnostic"]["evidence"].get("workspaces", {})
+                 for name, args in events if name == "diagnostic"]
+        personal = [p for p in plans if p.get("source") == "personal_accounts_check"]
+        self.assertEqual(len(personal), 1)
+        self.assertEqual(personal[0]["result"], "not_personal")
+        self.assertFalse(personal[0].get("items"))
+
+    def test_multiple_untyped_workspaces_are_not_guessed(self):
+        flow = Mock(target_team="our-team")
+        flow.decode_oauth_session_cookie.return_value = {"workspaces": [
+            {"id": "our-team"}, {"id": "other-a"}, {"id": "other-b"}]}
+        with self.assertRaises(observation.PersonalWorkspaceUnavailable):
+            observation.select_personal_workspace(flow, "https://auth.openai.com/consent")
+        flow.request.assert_not_called()
 
     def test_one_password_and_totp_personal_plan_then_target_team_same_session(self):
         result, fixture, evidence, sessions = self.run_flow()
