@@ -35,7 +35,7 @@ func sanitizeRefund(r *Refund) {
 // This also protects historical rows written before the private event split.
 func publicProgress(message string) bool {
 	switch message {
-	case passwordFailedMessage, passwordEndingMessage, passwordAttentionMessage:
+	case passwordFailedMessage, passwordEndingMessage, passwordAttentionMessage, autoReleasedMessage, autoUnconfirmedMessage:
 		return true
 	case "申请已受理", "开始处理", "处理时间延长，正在继续", "退款服务已完成", "正在继续处理", "申请需要跟进，请联系服务专员。", "本次服务未完成，冻结服务费已释放。", "申请已取消，冻结积分已释放。":
 		return true

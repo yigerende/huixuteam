@@ -31,7 +31,7 @@ type RefundJob struct {
 }
 
 // ClaimRefund serializes allocation in the database, not in process memory.
-// A mother remains reserved even while its request needs human attention.
+// Reservations stay exclusive during bounded recovery; final release ends them.
 func (s *Store) ClaimRefund(ctx context.Context) (*RefundJob, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -99,10 +99,7 @@ func (s *Store) ClaimRefund(ctx context.Context) (*RefundJob, error) {
 		if _, err = tx.Exec(ctx, "INSERT INTO refund_events(refund_id,message,internal) VALUES($1,$2,true)", job.ID, message); err != nil {
 			return nil, err
 		}
-		if err = transitionTx(ctx, tx, job.UserID, job.ID, "attention", "申请需要跟进，请联系服务专员。"); err != nil {
-			return nil, err
-		}
-		if _, err = tx.Exec(ctx, "UPDATE refund_execution SET lease_until=NULL,lease_token='',updated_at=now() WHERE refund_id=$1", job.ID); err != nil {
+		if err = autoReleaseRefund(ctx, tx, job, job.Step, RefundDiagnostic{Code: "worker_interrupted"}); err != nil {
 			return nil, err
 		}
 		return nil, tx.Commit(ctx)
@@ -131,7 +128,7 @@ func (s *Store) ClaimRefund(ctx context.Context) (*RefundJob, error) {
  AND (e.refund_id IS NULL OR ($2 AND e.released AND e.step='assigned' AND e.recovery_mode='mother_switch' AND e.next_attempt_at<=now()))
  AND EXISTS(SELECT 1 FROM refund_proxies cp WHERE cp.id=COALESCE(e.child_proxy_id,NULLIF($3,'')) AND cp.enabled)
  AND NOT EXISTS(SELECT 1 FROM refund_execution other JOIN refunds old ON old.id=other.refund_id
-  WHERE lower(old.email)=lower(r.email) AND (NOT other.released OR other.accepted_at IS NOT NULL))
+  WHERE lower(old.email)=lower(r.email) AND (NOT other.released OR old.status='succeeded'))
  ORDER BY r.created_at,r.id LIMIT 1`, cfg.MotherIntervalSeconds, failoverEnabled, cfg.ChildProxyID).Scan(&job.ID, &job.UserID, &job.Mother.ID, &childProxyID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -425,35 +422,9 @@ func (s *Store) RefundCheckpoint(ctx context.Context, j *RefundJob, c Checkpoint
 	return tx.Commit(ctx)
 }
 func (s *Store) RefundNeedsAttention(ctx context.Context, j *RefundJob, message string) error {
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT id FROM users WHERE id=$1 FOR UPDATE", j.UserID); err != nil {
-		return err
-	}
-	var token, step string
-	var released bool
-	if err = tx.QueryRow(ctx, "SELECT lease_token,step,released FROM refund_execution WHERE refund_id=$1 FOR UPDATE", j.ID).Scan(&token, &step, &released); err != nil {
-		return err
-	}
-	if token != j.LeaseToken || released {
-		return nil
-	}
-	if step == "submitting" {
-		message = "停用提交结果待核实，未重发请求，也未移出团队。"
-	}
-	if _, err = tx.Exec(ctx, "INSERT INTO refund_events(refund_id,message,internal) VALUES($1,$2,true)", j.ID, message); err != nil {
-		return err
-	}
-	if err = transitionTx(ctx, tx, j.UserID, j.ID, "attention", "申请需要跟进，请联系服务专员。"); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, "UPDATE refund_execution SET lease_until=NULL,lease_token='',updated_at=now() WHERE refund_id=$1", j.ID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	// Compatibility entry point: use the same bounded recovery and final release.
+	// Arbitrary caller messages never become evidence or customer notifications.
+	return s.FinishRefundAttempt(ctx, j, RefundDiagnostic{Code: "protocol_failed"})
 }
 
 func (s *Store) ResumeRefund(ctx context.Context, actor, id, action, note string) error {

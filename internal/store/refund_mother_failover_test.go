@@ -155,7 +155,7 @@ func TestMotherFailoverBoundedAndNeverSwitchesAfterInvite(t *testing.T) {
 	}
 	preflightFailed(t, s, next)
 	r, _ := s.Refund(ctx, u.ID, j.ID)
-	if r.Status != "attention" || r.FeeStatus != "frozen" {
+	if r.Status != "failed" || r.FeeStatus != "released" {
 		t.Fatal(r)
 	}
 	if after, e := s.ClaimRefund(ctx); e != nil || after != nil {
@@ -172,8 +172,8 @@ func TestMotherFailoverBoundedAndNeverSwitchesAfterInvite(t *testing.T) {
 		t.Fatal("unsafe switch")
 	}
 	e2, _ := s2.RefundExecution(ctx, j2.ID)
-	if e2.Released {
-		t.Fatal("unsafe resource release")
+	if !e2.Released {
+		t.Fatal("disabled recovery did not release after stopping")
 	}
 }
 

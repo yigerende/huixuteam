@@ -45,11 +45,7 @@ func scheduleMotherFailover(ctx context.Context, tx pgx.Tx, j *RefundJob, step s
 	}
 	cfg := j.Settings.MotherFailover
 	if cfg == nil || !cfg.Enabled || switches >= cfg.MaxSwitches {
-		if err := transitionTx(ctx, tx, j.UserID, j.ID, "attention", "申请需要跟进，请联系服务专员。"); err != nil {
-			return true, err
-		}
-		_, err := tx.Exec(ctx, "UPDATE refund_execution SET lease_token='',lease_until=NULL,next_attempt_at=NULL,recovery_mode='',updated_at=now() WHERE refund_id=$1", j.ID)
-		return true, err
+		return true, autoReleaseRefund(ctx, tx, j, step, d)
 	}
 	// This restricted transition is safe to cancel: no invite/login/submission was
 	// performed. Do not enable generic processing -> queued transitions elsewhere.

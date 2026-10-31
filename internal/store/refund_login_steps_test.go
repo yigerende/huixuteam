@@ -33,11 +33,11 @@ func TestExtraVerificationCleansBeforeReleaseWithoutLoginRetry(t *testing.T) {
 				t.Fatal(err)
 			}
 			r, _ := s.Refund(ctx, u.ID, j.ID)
-			if r.FeeStatus != "frozen" {
+			if cleanup && r.FeeStatus != "frozen" {
 				t.Fatal("released before cleanup", r)
 			}
 			if !cleanup {
-				if r.Status != "attention" {
+				if r.Status != "failed" || r.FeeStatus != "released" {
 					t.Fatal(r)
 				}
 				if next, err := s.ClaimRefund(ctx); err != nil || next != nil {

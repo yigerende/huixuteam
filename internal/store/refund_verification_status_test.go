@@ -96,7 +96,7 @@ func TestConfiguredResponseVerifiesWithoutResubmitAndReleasesOnlyCleanMother(t *
 		}
 	}
 	r, _ := s.Refund(ctx, u.ID, j.ID)
-	if r.Status != "attention" || r.FeeStatus != "frozen" {
+	if r.Status != "failed" || r.FeeStatus != "released" {
 		t.Fatal("unconfirmed outcome changed money", r)
 	}
 	view, _ = s.AdminRefundRecovery(ctx, j.ID)
@@ -116,13 +116,9 @@ func TestConfiguredResponseVerifiesWithoutResubmitAndReleasesOnlyCleanMother(t *
 	if err = s.ResumeRefund(ctx, a.ID, j.ID, "confirm_rejected", "fixture manual review"); err == nil {
 		t.Fatal("resubmission allowed after mother release")
 	}
-	// Continue personal verification after removal, never return to the team login.
-	if err = s.ResumeRefund(ctx, a.ID, j.ID, "verify_only", "fixture manual verification"); err != nil {
-		t.Fatal(err)
-	}
-	var mode string
-	if err = s.Pool.QueryRow(ctx, "SELECT recovery_mode FROM refund_execution WHERE refund_id=$1", j.ID).Scan(&mode); err != nil || mode != "fallback" {
-		t.Fatal("wrong resume mode", mode, err)
+	// Auto-ended services cannot be resumed or charged later.
+	if err = s.ResumeRefund(ctx, a.ID, j.ID, "verify_only", "fixture manual verification"); err == nil {
+		t.Fatal("auto-ended order resumed")
 	}
 }
 

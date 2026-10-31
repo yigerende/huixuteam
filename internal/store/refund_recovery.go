@@ -173,7 +173,7 @@ func scheduleRefundRecovery(ctx context.Context, tx pgx.Tx, j *RefundJob, step s
 		return err
 	}
 	cfg := j.Settings.Recovery
-	nextMode, status, message, delay := "", "attention", "申请需要跟进，请联系服务专员。", 0
+	nextMode, status, message, delay := "", "processing", "处理时间延长，正在继续", 0
 	passwordFailed := terminalCode == "password_verification_failed" && oneOf(step, "invited", "login", "ready")
 	if passwordFailed {
 		// Password rejection always ends the attempt. Recovery switches may
@@ -218,18 +218,14 @@ func scheduleRefundRecovery(ctx context.Context, tx pgx.Tx, j *RefundJob, step s
 			delay = cfg.CleanupIntervals[0]
 		}
 	}
-	if nextMode != "" {
-		status = "processing"
-		message = "处理时间延长，正在继续"
-		if nextMode == "verify" {
-			status = "verifying"
-		}
+	if nextMode == "" {
+		return autoReleaseRefund(ctx, tx, j, step, d)
+	}
+	if nextMode == "verify" {
+		status = "verifying"
 	}
 	if passwordFailed {
-		message = passwordAttentionMessage
-		if nextMode != "" {
-			message = passwordEndingMessage
-		}
+		message = passwordEndingMessage
 	}
 	if err := transitionTx(ctx, tx, j.UserID, j.ID, status, message); err != nil {
 		return err
@@ -238,12 +234,9 @@ func scheduleRefundRecovery(ctx context.Context, tx pgx.Tx, j *RefundJob, step s
 	if _, err := tx.Exec(ctx, "UPDATE refunds SET message=$2,updated_at=now() WHERE id=$1", j.ID, message); err != nil {
 		return err
 	}
-	internal := "自动恢复已暂停，需人工核实。"
+	internal := "已安排按间隔从原阶段续办。"
 	if nextMode == "verify" {
 		internal = "已安排自动核实，不重复提交。"
-	}
-	if nextMode == "retry" {
-		internal = "已安排按间隔从原阶段续办。"
 	}
 	if nextMode == "cleanup" {
 		internal = "已安排资源清理及结果核对。"

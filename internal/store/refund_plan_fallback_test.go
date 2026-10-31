@@ -131,7 +131,7 @@ func TestPlanFallbackPaidReinvitesSameRequestWithBoundedCycles(t *testing.T) {
 	}
 	r, _ := s.Refund(ctx, u.ID, old.ID)
 	v, _ := s.AdminRefundRecovery(ctx, old.ID)
-	if r.Status != "attention" || r.FeeStatus != "frozen" || v.NextAt != nil || v.Fallbacks != 2 {
+	if r.Status != "failed" || r.FeeStatus != "released" || v.NextAt != nil || v.Fallbacks != 2 {
 		t.Fatal("cycle cap ignored", r, v)
 	}
 	if j, err := s.ClaimRefund(ctx); j != nil || err != nil {
@@ -139,8 +139,8 @@ func TestPlanFallbackPaidReinvitesSameRequestWithBoundedCycles(t *testing.T) {
 	}
 	var n int
 	s.Pool.QueryRow(ctx, "SELECT count(*) FROM ledger WHERE refund_id=$1", old.ID).Scan(&n)
-	if n != 1 {
-		t.Fatal("unexpected money", n)
+	if n != 2 {
+		t.Fatal("expected one freeze and one release", n)
 	}
 }
 
@@ -180,7 +180,7 @@ func TestPlanFallbackFailureResumeAndDisablePreserveRemovalAndLimit(t *testing.T
 	}
 	r, _ := s.Refund(ctx, u.ID, j.ID)
 	v, _ := s.AdminRefundRecovery(ctx, j.ID)
-	if r.Status != "attention" || r.FeeStatus != "frozen" || v.NextAt != nil {
+	if r.Status != "failed" || r.FeeStatus != "released" || v.NextAt != nil {
 		t.Fatal("query failure falsely completed/retried", r, v)
 	}
 }

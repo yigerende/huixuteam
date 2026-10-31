@@ -184,19 +184,16 @@ func TestPassword401CheckpointGuardsAndInterruptedCleanup(t *testing.T) {
 			if err != nil || next == nil {
 				t.Fatal(err)
 			}
-		} else if r.Status != "attention" || r.HTTPStatus != 401 || r.FeeStatus != "frozen" {
+		} else if r.Status != "failed" || r.HTTPStatus != 401 || r.FeeStatus != "released" {
 			t.Fatal(r)
 		}
 	}
-	if err = s.ResumeRefund(ctx, a.ID, j.ID, "resume", "修复母号后继续清理"); err != nil {
-		t.Fatal(err)
+	if err = s.ResumeRefund(ctx, a.ID, j.ID, "resume", "修复母号后继续清理"); err == nil {
+		t.Fatal("released order resumed")
 	}
-	next, err = s.ClaimRefund(ctx)
-	if err != nil || next == nil || next.RecoveryMode != "cleanup" {
-		t.Fatal("admin resume relogged", next, err)
+	if next, err = s.ClaimRefund(ctx); err != nil || next != nil {
+		t.Fatal("released order ran again", next, err)
 	}
-	checkpoint(t, s, next, "cleanup_started")
-	checkpoint(t, s, next, "cleanup_completed")
 }
 
 func TestUnclassifiedLogin401RetriesBeforeCleanupAndCanSucceed(t *testing.T) {

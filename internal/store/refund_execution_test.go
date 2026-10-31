@@ -65,6 +65,18 @@ func prepareExport(t *testing.T, s *store.Store, j *store.RefundJob) {
 		checkpoint(t, s, j, method)
 	}
 }
+
+// Legacy records remain reviewable, but new failures no longer create attention.
+func legacyAttention(t *testing.T, s *store.Store, j *store.RefundJob) error {
+	t.Helper()
+	_, err := s.Pool.Exec(context.Background(), "UPDATE refunds SET status='attention' WHERE id=$1", j.ID)
+	if err != nil {
+		return err
+	}
+	_, err = s.Pool.Exec(context.Background(), "UPDATE refund_execution SET lease_token='',lease_until=NULL,released=false,next_attempt_at=NULL,recovery_mode='' WHERE refund_id=$1", j.ID)
+	return err
+}
+
 func TestMotherSerialMultipleMothersParallelAndOneSettlement(t *testing.T) {
 	s, _, u := executionFixture(t, 2)
 	submitRequests(t, s, u, 4)
@@ -182,7 +194,7 @@ func TestGenericProgressThrottledAndStopsWhenCompleted(t *testing.T) {
 		t.Fatalf("completed result changed: %+v %v", r, err)
 	}
 }
-func TestUnknownSubmissionHoldsMotherAndExplicitRecovery(t *testing.T) {
+func TestLegacyUnknownSubmissionHoldsMotherAndExplicitRecovery(t *testing.T) {
 	s, a, u := executionFixture(t, 1)
 	submitRequests(t, s, u, 2)
 	ctx := context.Background()
@@ -191,13 +203,10 @@ func TestUnknownSubmissionHoldsMotherAndExplicitRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	prepareExport(t, s, j)
-	if _, err = s.Pool.Exec(ctx, "UPDATE refund_execution SET lease_until=now()-interval '1 second' WHERE refund_id=$1", j.ID); err != nil {
+	if err = legacyAttention(t, s, j); err != nil {
 		t.Fatal(err)
 	}
-	next, err := s.ClaimRefund(ctx)
-	if err != nil || next != nil {
-		t.Fatal("uncertain submission replayed", err)
-	}
+	var next *store.RefundJob
 	r, _ := s.Refund(ctx, u.ID, j.ID)
 	if r.Status != "attention" || r.FeeStatus != "frozen" {
 		t.Fatalf("unknown state lost: %+v", r)
@@ -287,7 +296,7 @@ func TestSettingsSecretsImmutableReservationAndPermissions(t *testing.T) {
 	if err = s.DeleteRefundResource(ctx, a.ID, "mother", m.ID); err == nil {
 		t.Fatal("inflight mother deleted")
 	}
-	if err = s.RefundNeedsAttention(ctx, j, "Needs review"); err != nil {
+	if err = legacyAttention(t, s, j); err != nil {
 		t.Fatal(err)
 	}
 	m.TeamID = j.Mother.TeamID

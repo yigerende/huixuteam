@@ -42,7 +42,7 @@ func TestChildGlobalProxySeparateAndPinnedAcrossResume(t *testing.T) {
 	if err != nil || second == nil || second.ChildProxy != "http://next.invalid:8082" || second.MotherProxy != j.MotherProxy {
 		t.Fatal("new task did not use new global choice", err)
 	}
-	if err = s.RefundNeedsAttention(ctx, j, "fixture"); err != nil {
+	if err = legacyAttention(t, s, j); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.ResumeRefund(ctx, a.ID, j.ID, "resume", "reviewed fixture failure"); err != nil {
@@ -80,7 +80,7 @@ func TestMissingChildProxyQueuesButAcceptedCleanupCanFinish(t *testing.T) {
 	}
 	prepareExport(t, s, j)
 	checkpoint(t, s, j, "merge_v2_accepted")
-	if err = s.RefundNeedsAttention(ctx, j, "cleanup fixture"); err != nil {
+	if err = legacyAttention(t, s, j); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.ResumeRefund(ctx, a.ID, j.ID, "resume", "retry remaining cleanup only"); err != nil {

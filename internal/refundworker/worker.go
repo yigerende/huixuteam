@@ -274,23 +274,14 @@ func (w *Worker) Execute(parent context.Context, j *store.RefundJob) {
 	if readErr == nil && state != nil && state.Released {
 		return
 	}
-	message := protocolMessage("")
-	if err != nil {
-		message = err.Error()
+	// Always use the persisted planner; a disabled recovery switch means no
+	// further attempts, not an indefinitely frozen service request.
+	diagnostic := store.RefundDiagnostic{Code: "protocol_failed"}
+	var pe *ProtocolError
+	if errors.As(err, &pe) {
+		diagnostic = pe.Diagnostic
 	}
-	var finishErr error
-	var preflightError *ProtocolError
-	preflight := errors.As(err, &preflightError) && (preflightError.Diagnostic.Code == "mother_preflight_auth" || preflightError.Diagnostic.Code == "mother_preflight_failed")
-	if preflight || j.TerminalCode == "password_verification_failed" || (j.Settings.Recovery != nil && j.Settings.Recovery.Enabled) {
-		diagnostic := store.RefundDiagnostic{Code: "protocol_failed"}
-		var pe *ProtocolError
-		if errors.As(err, &pe) {
-			diagnostic = pe.Diagnostic
-		}
-		finishErr = w.DB.FinishRefundAttempt(finishCtx, j, diagnostic)
-	} else {
-		finishErr = w.DB.RefundNeedsAttention(finishCtx, j, message)
-	}
+	finishErr := w.DB.FinishRefundAttempt(finishCtx, j, diagnostic)
 	if finishErr != nil {
 		slog.Error("refund progress persistence failed", "refund_id", j.ID)
 	}

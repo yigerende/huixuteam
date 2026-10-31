@@ -170,9 +170,12 @@ func projectRefundTimeline(status string, created, now time.Time, accepted, comp
 					finishStage("移", e.at, "已完成", "")
 				}
 				add("结", "已完成", e.at, true, "")
-			case "本次服务未完成，冻结服务费已释放。", "申请已取消，冻结积分已释放。":
+			case "本次服务未完成，冻结服务费已释放。", "申请已取消，冻结积分已释放。", autoReleasedMessage:
 				interrupt(e.at)
 				add("结", "已结束", e.at, true, "服务未完成，费用已释放")
+			case autoUnconfirmedMessage:
+				interrupt(e.at)
+				add("结", "已结束", e.at, true, "未能确认最终结果，费用已释放")
 			}
 			continue
 		}
@@ -245,8 +248,12 @@ func projectRefundTimeline(status string, created, now time.Time, accepted, comp
 		}
 	}
 	if completed != nil && last("结") < 0 {
-		finishStage("移", *completed, "已完成", "")
-		add("结", "已完成", *completed, true, "")
+		if status == "succeeded" {
+			finishStage("移", *completed, "已完成", "")
+			add("结", "已完成", *completed, true, "")
+		} else {
+			add("结", "已结束", *completed, true, "")
+		}
 	}
 	if !out.Active {
 		for i := range out.Items {

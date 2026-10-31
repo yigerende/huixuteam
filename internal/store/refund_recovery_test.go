@@ -68,15 +68,15 @@ func TestUnknownRecoveryBoundedDurableExclusiveAndNeverSettles(t *testing.T) {
 		}
 	}
 	r, _ := s.Refund(ctx, u.ID, j.ID)
-	if r.Status != "attention" || r.FeeStatus != "frozen" {
+	if r.Status != "failed" || r.FeeStatus != "released" {
 		t.Fatal("unknown settled", r)
 	}
 	view, _ := s.AdminRefundRecovery(ctx, j.ID)
 	if view.Checks != 4 || view.NextAt != nil {
 		t.Fatal("unbounded polling", view)
 	}
-	if next, err := s.ClaimRefund(ctx); err != nil || next != nil {
-		t.Fatal("exhausted restarted", err)
+	if next, err := s.ClaimRefund(ctx); err != nil || next == nil || next.ID == j.ID {
+		t.Fatal("released mother did not accept the next request", err)
 	}
 	var count int
 	s.Pool.QueryRow(ctx, "SELECT count(*) FROM ledger WHERE refund_id=$1 AND kind='settlement'", j.ID).Scan(&count)
@@ -241,7 +241,7 @@ func TestRecoverySettingsValidationAndLegacyAttentionEnrollment(t *testing.T) {
 	ctx := context.Background()
 	j, _ := s.ClaimRefund(ctx)
 	prepareExport(t, s, j)
-	if err := s.RefundNeedsAttention(ctx, j, "old unknown"); err != nil {
+	if err := legacyAttention(t, s, j); err != nil {
 		t.Fatal(err)
 	}
 	if next, err := s.ClaimRefund(ctx); err != nil || next != nil {
