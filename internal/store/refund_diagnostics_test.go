@@ -29,7 +29,8 @@ func TestPrivateDiagnosticsAppendAfterCompletionWithoutChangingState(t *testing.
 	w := store.RefundDiagnostic{ObservedAt: observed, Evidence: &store.RefundEvidence{Stage: "workspace_observation", Side: "child", Event: "response", Workspaces: &store.RefundWorkspaceObservation{
 		Source: "auth_workspaces", Phase: "before_team_select", Result: "observed", Items: []store.RefundWorkspaceItem{{WorkspaceID: "our-team", TargetTeam: true, Fields: map[string]string{"workspace.plan_type": "unknown_pro_50x", "access_token": "private-token"}}},
 	}}}
-	if err = s.AppendRefundDiagnostics(ctx, j, []store.RefundDiagnostic{w, d}); err != nil {
+	m := store.RefundDiagnostic{Evidence: &store.RefundEvidence{Stage: "members_read", Side: "mother", Event: "response", Membership: &store.RefundMembershipEvidence{Scope: "full", Result: "absent", MatchedBy: "none", Pages: 2, Items: 108, Complete: true}}}
+	if err = s.AppendRefundDiagnostics(ctx, j, []store.RefundDiagnostic{m, w, d}); err != nil {
 		t.Fatal(err)
 	}
 	var raw []byte
@@ -53,6 +54,13 @@ func TestPrivateDiagnosticsAppendAfterCompletionWithoutChangingState(t *testing.
 	}
 	if !strings.Contains(string(raw), "unknown_pro_50x") || !strings.Contains(string(raw), "before_team_select") || strings.Contains(string(raw), "private-token") {
 		t.Fatal("workspace evidence was lost or leaked credentials", string(raw))
+	}
+	if err = s.Pool.QueryRow(ctx, "SELECT diagnostic FROM refund_execution_diagnostics WHERE refund_id=$1 AND diagnostic->'evidence'->>'stage'='members_read'", j.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var membership store.RefundDiagnostic
+	if err = json.Unmarshal(raw, &membership); err != nil || membership.Evidence.Membership == nil || !membership.Evidence.Membership.Complete || membership.Evidence.Membership.Items != 108 {
+		t.Fatal("membership evidence was lost", err)
 	}
 	after, _ := s.Refund(ctx, u.ID, j.ID)
 	if before.Status != after.Status || after.Status != "succeeded" || after.FeeStatus != "settled" || !before.UpdatedAt.Equal(after.UpdatedAt) {

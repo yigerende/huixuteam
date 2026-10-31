@@ -88,6 +88,7 @@ class MotherClient:
     def __init__(self, job):
         self.mother = job["mother"]
         self.email = job["account"]["email"].casefold()
+        self.child_id = job.get("child_user_id") or ""
         if self.email == self.mother["email"].casefold():
             raise UpstreamFailure("mother_identity")
         claims = upstream.jwt_payload(self.mother["access_token"])
@@ -105,6 +106,7 @@ class MotherClient:
             "chatgpt-account-id": self.mother["team_id"],
             "Origin": "https://chatgpt.com", "Referer": "https://chatgpt.com/admin/members",
             "Accept": "application/json", "oai-language": "zh-CN",
+            "Cache-Control": "no-cache", "Pragma": "no-cache",
         }
 
     def call(self, method, suffix, body=None, timeout=60):
@@ -125,11 +127,14 @@ class MotherClient:
         return response
 
     def find(self, collection):
-        # Read only this email, with complete bounded pagination. An unknown shape
-        # must never be interpreted as "already removed".
+        # A filtered search can omit a real member. Only an unfiltered, complete
+        # roster can establish absence; identify the one target locally.
         offset = 0
-        for _ in range(100):
-            query = {"offset": offset, "limit": 100, "query": self.email}
+        seen_pages = set()
+        # Match Space's live mother-member listing: at most 25 per request.
+        page_size = 25
+        for page in range(1, 101):
+            query = {"offset": offset, "limit": page_size, "query": ""}
             if collection == "invites":
                 query.update(include_pending="true", include_requests="true")
             response = self.call("GET", "/" + collection + "?" + urlencode(query))
@@ -148,18 +153,29 @@ class MotherClient:
                     or ("has_more" in data and type(has_more) is not bool)
                     or (has_more is False and total is not None and offset + len(items) < total)):
                 raise UpstreamFailure("mother_shape")
+            fingerprint = tuple((str(row.get("email") or row.get("email_address") or ""),
+                                 str(row.get("id") or ""), str(row.get("user_id") or "")) for row in items)
+            if items and fingerprint in seen_pages:
+                raise UpstreamFailure("mother_pagination")
+            seen_pages.add(fingerprint)
             for row in items:
                 email = row.get("email") or row.get("email_address")
                 if not isinstance(email, str) or not email:
                     raise UpstreamFailure("mother_shape")
-                if email.casefold() == self.email:
+                email_match = email.casefold() == self.email
+                id_match = collection == "users" and bool(self.child_id) and self.child_id in {
+                    str(row.get(k) or "") for k in ("id", "user_id", "chatgpt_user_id")}
+                if email_match or id_match:
+                    diagnostics.membership_result(collection, "found", page, offset + len(items),
+                                                  "both" if email_match and id_match else "email" if email_match else "user_id")
                     return row
             offset += len(items)
             if has_more is True or (total is not None and offset < total):
                 if not items:
                     raise UpstreamFailure("mother_shape")
                 continue
-            if has_more is False or total is not None or len(items) < 100:
+            if has_more is False or total is not None or len(items) < page_size:
+                diagnostics.membership_result(collection, "absent", page, offset)
                 return None
         raise UpstreamFailure("mother_pagination")
 
@@ -183,6 +199,7 @@ class MotherClient:
             raise UpstreamFailure(code, exc.status, exc.network_code) from None
 
     def remove(self, child_id):
+        self.child_id = child_id or self.child_id
         row = self.find("users")
         if row is None:
             return  # Complete list confirms removal, including a lost DELETE response.
@@ -336,8 +353,8 @@ def _execute(job, checkpoint, mother_factory, login_factory, sleep):
             return {"ok": False, "code": "export_uncertain"}
         checkpoint("removing")
         mother.remove(child_id)
-        if recovery:
-            mother.confirm_removed()
+        # Recovery config controls subsequent attempts, never success evidence.
+        mother.confirm_removed()
         checkpoint("completed")
         return {"ok": True}
     except StopProtocol:

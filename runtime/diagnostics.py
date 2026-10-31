@@ -94,6 +94,15 @@ def failure(exc, operation, side="child", flow=None):
     return evidence
 
 
+def membership_result(collection, result, pages, items, matched_by="none"):
+    # No roster, emails, account IDs or response payloads cross this boundary.
+    record({"stage": "members_read" if collection == "users" else "invites_read",
+            "side": "mother", "event": "response",
+            "membership": {"scope": "full", "result": result, "pages": pages,
+                           "items": items, "matched_by": matched_by,
+                           "complete": result == "absent"}})
+
+
 def login_step(data, operation):
     # Fixed categories only. No URLs, response bodies, factor IDs or OTPs.
     from manager_oauth.upstream import ChatGPTProtocolLogin

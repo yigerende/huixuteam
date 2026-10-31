@@ -135,7 +135,8 @@ class ProxyFlow:
             assert headers["chatgpt-account-id"] == team
             prefix = "/backend-api/accounts/" + team
             if method == "GET" and path in {prefix + "/users", prefix + "/invites"}:
-                assert parse_qs(url.query)["query"] == [email]
+                assert parse_qs(url.query, keep_blank_values=True)["query"] == [""], "absence requires the full roster"
+                assert parse_qs(url.query)["limit"] == ["25"]
                 rows = [{"email": email, "id": "child-user", "role": "standard-user"}] if self.members and path.endswith("/users") else []
                 if self.invited and path.endswith("/invites"):
                     rows = [{"email_address": email, "id": "invite-child", "role": "standard-user"}]

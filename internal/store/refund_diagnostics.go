@@ -30,6 +30,17 @@ type RefundEvidence struct {
 	ExitCode          int    `json:"exit_code,omitempty"`
 
 	Workspaces *RefundWorkspaceObservation `json:"workspaces,omitempty"`
+	Membership *RefundMembershipEvidence   `json:"membership,omitempty"`
+}
+
+// Bounded lookup facts only; never persist the roster or customer identifiers.
+type RefundMembershipEvidence struct {
+	Scope     string `json:"scope"`
+	Result    string `json:"result"`
+	MatchedBy string `json:"matched_by"`
+	Pages     int    `json:"pages"`
+	Items     int    `json:"items"`
+	Complete  bool   `json:"complete"`
 }
 
 const evidenceReasons = "csrf_or_risk_blocked chatgpt_signin_failed oauth_session_missing chatgpt_rate_limited totp_secret_missing totp_secret_invalid totp_factor_missing totp_dep_missing phone_verification_skipped passkey_or_challenge account_deactivated account_deleted account_banned account_disabled account_suspended incorrect_password invalid_password login_auth_failed invalid_grant invalid_workspace_selected invalid_session invalid_auth_step token_expired rate_limit_exceeded invalid_totp_code invalid_otp unknown_error network_error process_exit process_start process_io deadline cancelled checkpoint_failed malformed_protocol missing_result evidence_limit other"
@@ -61,6 +72,18 @@ func (v RefundEvidence) Sanitized() *RefundEvidence {
 		v.Workspaces = nil
 	}
 	v.Side = evidenceEnum(v.Side, "child mother worker")
+	if v.Membership != nil && v.Side == "mother" && (v.Stage == "members_read" || v.Stage == "invites_read") {
+		m := *v.Membership
+		m.Scope = evidenceEnum(m.Scope, "full")
+		m.Result = evidenceEnum(m.Result, "found absent")
+		m.MatchedBy = evidenceEnum(m.MatchedBy, "none email user_id both")
+		m.Pages = evidenceNumber(m.Pages, 100)
+		m.Items = evidenceNumber(m.Items, 10000)
+		m.Complete = m.Complete && m.Scope == "full" && m.Result == "absent" && m.Pages > 0
+		v.Membership = &m
+	} else {
+		v.Membership = nil
+	}
 	v.Event = evidenceEnum(v.Event, "start response error failure truncated")
 	v.Reason = evidenceEnum(v.Reason, evidenceReasons+" extra_verification login_response_incomplete login_step_unsupported")
 	v.UpstreamCode = evidenceEnum(v.UpstreamCode, evidenceReasons)
