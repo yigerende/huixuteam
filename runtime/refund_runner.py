@@ -38,7 +38,16 @@ def rpc(method, params=None, **kwargs):
 
 
 class CustomerLogin(WorkspaceObservationMixin, TeamProtocolLogin):
+    def _finish_chatgpt_login(self, continue_url):
+        if self.payload.get("_skip_personal_plan_observation"):
+            return super()._finish_chatgpt_login(continue_url)
+        from personal_plan_observation import finish_personal_then_team
+        return finish_personal_then_team(self, continue_url)
+
     def submit_workspace_and_org(self, referer_url):
+        if getattr(self, "_selecting_personal_plan", False):
+            from personal_plan_observation import select_personal_workspace
+            return select_personal_workspace(self, referer_url)
         observe(self, "before_team_select")
         return super().submit_workspace_and_org(referer_url)
 
@@ -264,6 +273,8 @@ def _execute(job, checkpoint, mother_factory, login_factory, sleep):
                     "verification_http_statuses": (job["settings"].get("recovery") or {}).get("verification_http_statuses", [404])},
             }
             if mode == "verify":
+                # Existing result verification is not a pre-submission login.
+                payload["_skip_personal_plan_observation"] = True
                 from refund_recovery import verify
                 bridge.configure(payload, lambda *_: (_ for _ in ()).throw(StopProtocol()))
                 return verify(job, checkpoint, login_factory, payload)

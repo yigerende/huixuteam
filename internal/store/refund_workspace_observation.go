@@ -27,10 +27,13 @@ var workspaceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}$`)
 var workspacePlanPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 _+()-]{0,63}$`)
 
 func (v RefundWorkspaceObservation) sanitized() *RefundWorkspaceObservation {
-	v.Source = evidenceEnum(v.Source, "auth_workspaces")
+	v.Source = evidenceEnum(v.Source, "auth_workspaces personal_accounts_check")
 	v.Phase = evidenceEnum(v.Phase, "authenticated_before_callback before_team_select before_personal_select")
-	v.Result = evidenceEnum(v.Result, "observed missing invalid unavailable")
+	v.Result = evidenceEnum(v.Result, "observed missing invalid unavailable not_personal identity_unavailable")
 	if v.Source == "" || v.Phase == "" || v.Result == "" {
+		return nil
+	}
+	if v.Source == "personal_accounts_check" && v.Phase != "before_team_select" {
 		return nil
 	}
 	if len(v.Items) > 16 {
@@ -39,6 +42,9 @@ func (v RefundWorkspaceObservation) sanitized() *RefundWorkspaceObservation {
 	}
 	items := make([]RefundWorkspaceItem, 0, len(v.Items))
 	for _, row := range v.Items {
+		if v.Source == "personal_accounts_check" && (row.Structure != "personal" || row.TargetTeam) {
+			continue
+		}
 		if !workspaceIDPattern.MatchString(row.WorkspaceID) {
 			row.WorkspaceID = ""
 		}

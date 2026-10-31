@@ -64,3 +64,40 @@ func TestPrivateDiagnosticsAppendAfterCompletionWithoutChangingState(t *testing.
 		t.Fatal("telemetry changed settlement")
 	}
 }
+
+func TestPersonalPlanObservationPersistsWithoutChangingOrderOrMoney(t *testing.T) {
+	s, _, u := executionFixture(t, 1)
+	submitRequests(t, s, u, 1)
+	ctx := context.Background()
+	j, err := s.ClaimRefund(ctx)
+	if err != nil || j == nil {
+		t.Fatal(err)
+	}
+	before, _ := s.Refund(ctx, u.ID, j.ID)
+	d := store.RefundDiagnostic{ObservedAt: time.Now().UTC(), HTTPStatus: 200, Evidence: &store.RefundEvidence{
+		Stage: "workspace_observation", Side: "child", Event: "response", Workspaces: &store.RefundWorkspaceObservation{
+			Source: "personal_accounts_check", Phase: "before_team_select", Result: "observed",
+			Items: []store.RefundWorkspaceItem{{WorkspaceID: "personal-fixture", Structure: "personal",
+				Fields: map[string]string{"account.plan_type": "unknown_pro", "entitlement.subscription_plan": "chatgptpro_50x", "entitlement.rate_limit_multiplier": "50", "account.access_token": "private-token"}}},
+		},
+	}}
+	if err := s.AppendRefundDiagnostics(ctx, j, []store.RefundDiagnostic{d}); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	if err := s.Pool.QueryRow(ctx, "SELECT diagnostic FROM refund_execution_diagnostics WHERE refund_id=$1", j.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "chatgptpro_50x") || !strings.Contains(string(raw), "before_team_select") || strings.Contains(string(raw), "private-token") {
+		t.Fatal("plan observation missing or unsafe")
+	}
+	after, _ := s.Refund(ctx, u.ID, j.ID)
+	if before.Status != after.Status || before.FeeStatus != after.FeeStatus || !before.UpdatedAt.Equal(after.UpdatedAt) {
+		t.Fatal("observation changed processing state")
+	}
+	var effects int
+	s.Pool.QueryRow(ctx, "SELECT count(*) FROM ledger WHERE refund_id=$1 AND kind IN ('settlement','release')", j.ID).Scan(&effects)
+	if effects != 0 {
+		t.Fatal("observation affected balance")
+	}
+}

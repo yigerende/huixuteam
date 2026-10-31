@@ -43,3 +43,26 @@ func TestWorkspaceEvidenceBoundsRowsAndRejectsInvalidPhase(t *testing.T) {
 		t.Fatal("invalid phase persisted")
 	}
 }
+
+func TestPersonalPlanEvidenceIsPrivateObservationBeforeTeamSelection(t *testing.T) {
+	d := store.RefundEvidence{Stage: "workspace_observation", Workspaces: &store.RefundWorkspaceObservation{
+		Source: "personal_accounts_check", Phase: "before_team_select", Result: "observed",
+		Items: []store.RefundWorkspaceItem{
+			{WorkspaceID: "personal", Structure: "personal", Fields: map[string]string{"account.plan_type": "future_pro_50x", "entitlement.rate_limit_multiplier": "50", "account.access_token": "private-token"}},
+			{WorkspaceID: "business", Structure: "workspace", Fields: map[string]string{"account.plan_type": "private-business"}},
+			{WorkspaceID: "our-team", Structure: "personal", TargetTeam: true},
+		},
+	}}
+	got := d.Sanitized().Workspaces
+	if got == nil || len(got.Items) != 1 || got.Items[0].Fields["account.plan_type"] != "future_pro_50x" || got.Items[0].Fields["entitlement.rate_limit_multiplier"] != "50" {
+		t.Fatal("personal plan observation lost or mixed with team", got)
+	}
+	raw, _ := json.Marshal(got)
+	if strings.Contains(string(raw), "private") {
+		t.Fatal("private fields persisted")
+	}
+	d.Workspaces.Phase = "before_personal_select"
+	if d.Sanitized().Workspaces != nil {
+		t.Fatal("mislabelled personal plan accepted")
+	}
+}

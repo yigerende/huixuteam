@@ -66,7 +66,7 @@ func (v RefundEvidence) Sanitized() *RefundEvidence {
 	v.UpstreamCode = evidenceEnum(v.UpstreamCode, evidenceReasons)
 	v.Exception = evidenceEnum(v.Exception, "RuntimeError ValueError KeyError TypeError AttributeError ImportError ModuleNotFoundError TimeoutError OSError ConnectionError LoginFlowError DeadAccountError NeedsVerification UpstreamFailure VerificationUnavailable RequestsError ProxyError SSLError DNSError ConnectTimeout ReadTimeout ConnectionResetError JSONDecodeError other")
 	v.BodyKind = evidenceEnum(v.BodyKind, "json html text")
-	v.Source = evidenceEnum(v.Source, "refund_runner.py refund_recovery.py refund_plan_fallback.py diagnostics.py adapter.py upstream.py merge_v2.py bridge.py tls.py sentinel_vm.py")
+	v.Source = evidenceEnum(v.Source, "refund_runner.py refund_recovery.py refund_plan_fallback.py personal_plan_observation.py diagnostics.py adapter.py upstream.py merge_v2.py bridge.py tls.py sentinel_vm.py")
 	v.Line = evidenceNumber(v.Line, 100000)
 	v.Sequence = evidenceNumber(v.Sequence, 144)
 	v.TransportAttempt = evidenceNumber(v.TransportAttempt, 10)

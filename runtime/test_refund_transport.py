@@ -40,9 +40,17 @@ class ProxyFlow:
         self.threads = []
         self.sent_tokens = []
         self.cookies = []
+        self.selected_space = ""
+        self.authenticated = False
+        self.authorization = 0
+        self.used_codes = set()
+        self.plan_status = 200
+        self.child_sessions = set()
         claims = {"email": job["account"]["email"], "https://api.openai.com/auth": {
             "chatgpt_account_id": job["mother"]["team_id"], "chatgpt_user_id": "child-user"}}
         self.token = "x." + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=") + ".x"
+        claims["https://api.openai.com/auth"]["chatgpt_account_id"] = "fixture-personal"
+        self.personal_token = "x." + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=") + ".x"
 
     def __enter__(self):
         fixture = self
@@ -85,6 +93,8 @@ class ProxyFlow:
             assert url.startswith("https://")
             assert set(session.proxies.values()) <= allowed and session.proxies
             assert session.proxies.get("http") in allowed and session.proxies.get("https") in allowed
+            if session.proxies.get("https") == self.job["child_proxy"]:
+                self.child_sessions.add(id(session))
             response = original(session, method, url.replace("https://", "http://", 1), **kwargs)
             response.url = url
             return response
@@ -112,8 +122,13 @@ class ProxyFlow:
         email = self.job["account"]["email"]
         if path == "/backend-api/accounts/check/v4-2023-04-27":
             assert role == "child" and method == "GET"
-            assert headers["Authorization"] == "Bearer " + self.token
-            return 200, {"accounts":{"personal":{"account":{"account_id":"fixture-personal","structure":"personal","is_deactivated":False}}}}, {}
+            assert headers["Authorization"] in {"Bearer " + self.token, "Bearer " + self.personal_token}
+            return self.plan_status, {"accounts":{"personal":{"account":{"account_id":"fixture-personal","structure":"personal","is_deactivated":False,"plan_type":"pro"},
+                    "entitlement":{"subscription_plan":"unknown_pro_50x","rate_limit_multiplier":50,"has_active_subscription":True}},
+                    "team":{"account":{"account_id":team,"structure":"workspace","plan_type":"team"}}}}, {}
+        if path == "/backend-api/me":
+            assert headers["Authorization"] == "Bearer " + self.personal_token
+            return 200, {"email": email}, {}
         if path.startswith("/backend-api/accounts/") and path != "/backend-api/accounts/export_and_deactivate":
             assert role == "mother"
             assert headers["Authorization"] == "Bearer " + self.job["mother"]["access_token"]
@@ -146,7 +161,15 @@ class ProxyFlow:
         if path == "/api/auth/csrf": return 200, {"csrfToken": "fixture-csrf"}, {"Set-Cookie": "fixture_login=shared; Path=/"}
         if path == "/api/auth/signin/openai":
             assert method == "POST" and parse_qs(raw.decode())["csrfToken"] == ["fixture-csrf"]
+            self.authorization += 1
+            if parse_qs(url.query).get("prompt") == ["consent"]:
+                assert self.authenticated
+                return 200, {"url": "https://auth.openai.com/authorize-team?state=team-state"}, {}
             return 200, {"url": "https://auth.openai.com/authorize"}, {}
+        if path == "/authorize-team":
+            assert self.authenticated and "login_session=fixture-login" in headers.get("Cookie", "")
+            return 302, {}, {"Location": "https://auth.openai.com/consent"}
+        if path == "/consent": return 200, {}, {}
         if path == "/authorize": return 200, {}, {"Set-Cookie": "login_session=fixture-login; Path=/"}
         if path == "/api/accounts/authorize/continue":
             assert data["username"]["value"] == email
@@ -163,18 +186,31 @@ class ProxyFlow:
             return 200, {}, {}
         if path == "/api/accounts/mfa/verify":
             assert pyotp.TOTP(self.job["account"]["totp_secret"]).verify(data["code"], valid_window=1)
+            self.authenticated = True
             return 200, {"continue_url": "https://auth.openai.com/workspace"}, {}
-        if path == "/workspace": return 200, {}, {}
+        if path == "/workspace":
+            cookie = base64.urlsafe_b64encode(json.dumps({"workspaces":[{"id":"fixture-personal","type":"personal"},{"id":team,"type":"workspace"}]}).encode()).decode().rstrip("=")
+            return 200, {}, {"Set-Cookie":"oai-client-auth-session="+cookie+"; Path=/"}
         if path == "/api/accounts/workspace/select":
-            assert data == {"workspace_id": team}
-            self.members = True
-            self.invited = False
-            return 200, {"continue_url": "https://chatgpt.com/api/auth/callback/openai?code=fixture-code"}, {}
+            assert data in ({"workspace_id": team}, {"workspace_id":"fixture-personal"})
+            self.selected_space = data["workspace_id"]
+            if self.selected_space == team:
+                self.members = True
+                self.invited = False
+            code = str(self.authorization) + "-" + self.selected_space
+            suffix = "&state=team-state" if self.authorization > 1 else ""
+            return 200, {"continue_url": "https://chatgpt.com/api/auth/callback/openai?code="+code+suffix}, {}
         if path == "/api/auth/callback/openai":
             assert "fixture_login=shared" in headers.get("Cookie", "")
+            code = parse_qs(url.query)["code"][0]
+            assert code not in self.used_codes
+            self.used_codes.add(code)
             return 302, {}, {"Location": "https://chatgpt.com/", "Set-Cookie": "fixture_team=selected; Path=/"}
         if path == "/api/auth/session":
-            assert self.members and "fixture_team=selected" in headers.get("Cookie", "")
+            assert "fixture_team=selected" in headers.get("Cookie", "")
+            if self.selected_space == "fixture-personal":
+                return 200, {"accessToken": self.personal_token, "account": {"id": "fixture-personal"}, "user": {"email": email}}, {}
+            assert self.members
             return 200, {"accessToken": self.token, "account": {"id": team}, "user": {"email": email}}, {}
         if path == "/backend-api/accounts/export_and_deactivate":
             assert method == "POST" and not raw

@@ -14,6 +14,9 @@ class WorkspaceObservationTests(unittest.TestCase):
     def flow(self, cls=CustomerLogin):
         flow = cls.__new__(cls)
         flow.payload = {"merge_v2": {"team_id": "our-team"}, "excluded_team": "our-team"}
+        # These contracts cover the metadata-only hook. The personal-first
+        # CustomerLogin path has separate end-to-end transport tests.
+        flow.payload["_skip_personal_plan_observation"] = True
         flow.decode_oauth_session_cookie = Mock(return_value={"workspaces": [
             {"id": "customer-team", "type": "workspace", "role": "owner", "plan_type": "team", "name": "private-name"},
             {"id": "our-team", "type": "workspace", "is_personal": False},
