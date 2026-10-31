@@ -20,6 +20,8 @@ REASONS.update({"extra_verification", "login_response_incomplete", "login_step_u
 FILES = {"refund_runner.py", "refund_recovery.py", "refund_plan_fallback.py", "diagnostics.py", "adapter.py", "upstream.py", "merge_v2.py", "bridge.py", "tls.py", "sentinel_vm.py"}
 _sink = None
 _count = 0
+_workspace_count = 0
+_sequence = 0
 
 
 def integer(value, maximum=900000):
@@ -66,14 +68,24 @@ def exception_evidence(exc, operation, side="child", flow=None):
 
 
 def record(evidence, **numbers):
-    global _count
-    if _sink is None or _count >= 128:
+    global _count, _workspace_count, _sequence
+    if _sink is None:
         return
-    _count += 1
-    if _count == 128:
-        evidence = {"stage": "runtime", "side": "worker", "event": "truncated", "reason": "evidence_limit"}
-        numbers = {}
-    _sink("diagnostic", {"diagnostic": {"code": "protocol_trace", **numbers, "evidence": {**evidence, "sequence": _count}}})
+    if evidence.get("stage") == "workspace_observation":
+        # Reserve a separate small budget so verbose OAuth requests cannot use
+        # up the requested before-selection observations before they happen.
+        if _workspace_count >= 16:
+            return
+        _workspace_count += 1
+    else:
+        if _count >= 128:
+            return
+        _count += 1
+        if _count == 128:
+            evidence = {"stage": "runtime", "side": "worker", "event": "truncated", "reason": "evidence_limit"}
+            numbers = {}
+    _sequence += 1
+    _sink("diagnostic", {"diagnostic": {"code": "protocol_trace", **numbers, "evidence": {**evidence, "sequence": _sequence}}})
 
 
 def failure(exc, operation, side="child", flow=None):
@@ -134,10 +146,10 @@ def request_event(operation, event, *, side="child", response=None, exc=None, st
 
 @contextlib.contextmanager
 def capture(checkpoint):
-    global _sink, _count
-    previous = _sink, _count
-    _sink, _count = checkpoint, 0
+    global _sink, _count, _workspace_count, _sequence
+    previous = _sink, _count, _workspace_count, _sequence
+    _sink, _count, _workspace_count, _sequence = checkpoint, 0, 0, 0
     try:
         yield
     finally:
-        _sink, _count = previous
+        _sink, _count, _workspace_count, _sequence = previous

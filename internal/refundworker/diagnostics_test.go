@@ -31,7 +31,9 @@ func TestDiagnosticQueueDoesNotBlockOnSlowDatabase(t *testing.T) {
 	<-blocked
 	started := time.Now()
 	for i := 0; i < 10000; i++ {
-		emit(store.RefundDiagnostic{Code: "protocol_trace"})
+		emit(store.RefundDiagnostic{Code: "protocol_trace", Evidence: &store.RefundEvidence{Stage: "workspace_observation", Workspaces: &store.RefundWorkspaceObservation{
+			Source: "auth_workspaces", Phase: "before_team_select", Result: "observed", Items: []store.RefundWorkspaceItem{{WorkspaceID: "team-1", TargetTeam: true, Fields: map[string]string{"workspace.plan_type": "team"}}},
+		}}})
 	}
 	closeQueue()
 	if time.Since(started) > time.Second {

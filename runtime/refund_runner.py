@@ -13,6 +13,7 @@ from urllib.parse import quote, urlencode
 from curl_cffi import requests
 from manager_oauth import bridge, upstream
 from manager_oauth.merge_v2 import TeamProtocolLogin
+from workspace_observation import WorkspaceObservationMixin, observe
 
 
 class StopProtocol(BaseException):
@@ -36,7 +37,11 @@ def rpc(method, params=None, **kwargs):
     return {}
 
 
-class CustomerLogin(TeamProtocolLogin):
+class CustomerLogin(WorkspaceObservationMixin, TeamProtocolLogin):
+    def submit_workspace_and_org(self, referer_url):
+        observe(self, "before_team_select")
+        return super().submit_workspace_and_org(referer_url)
+
     def inspect_login_step(self, step, operation):
         # The generic login client falls back to email OTP when the next URL is
         # absent. This service has password/TOTP only: absence is not OTP proof.

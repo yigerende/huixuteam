@@ -6,9 +6,10 @@ import diagnostics
 from manager_oauth import bridge, upstream
 from manager_oauth.adapter import ProjectProtocolLogin
 from manager_oauth.merge_v2 import TeamProtocolLogin
+from workspace_observation import WorkspaceObservationMixin, observe
 
 
-class PersonalLogin(ProjectProtocolLogin):
+class PersonalLogin(WorkspaceObservationMixin, ProjectProtocolLogin):
     # Retain the existing password/TOTP, cookies, proxy and callback mechanics.
     follow_callback = TeamProtocolLogin.follow_callback
 
@@ -18,6 +19,7 @@ class PersonalLogin(ProjectProtocolLogin):
         super().log(step, message, level)
 
     def submit_workspace_and_org(self, referer_url):
+        observe(self, "before_personal_select")
         data = self.decode_oauth_session_cookie()
         rows = data.get("workspaces", []) if isinstance(data, dict) else []
         rows = [r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str) and r["id"] != self.payload["excluded_team"]]
